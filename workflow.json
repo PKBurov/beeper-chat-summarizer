@@ -1,0 +1,146 @@
+{
+  "name": "News-Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "summarize",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-592, -128],
+      "id": "node-webhook",
+      "name": "Webhook",
+      "webhookId": "YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT sender, body FROM chat_logs WHERE body NOT LIKE '%**Overview**%' AND body NOT LIKE '%**Summary%' AND body != 'm.room.redaction' ORDER BY timestamp ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [-384, -128],
+      "id": "node-sql-select",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nameMap = {\n  '@yourusername:beeper.com': 'Your Name'\n  // Add more mappings as needed\n};\n\nlet fullChat = \"Please summarize this chat conversation:\\n\\n\";\n\nfor (let item of $input.all()) {\n  let sender = item.json.sender;\n  let text = item.json.body;\n  let displayName = nameMap[sender] || sender;\n  \n  fullChat += `[${displayName}]: ${text}\\n`;\n}\n\nreturn [{ json: { chat_history: fullChat } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-176, -128],
+      "id": "node-js-code",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "llama3.2:latest",
+          "mode": "list",
+          "cachedResultName": "llama3.2:latest"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional chat analyst. Analyze the conversation transcript below and return a structured summary using exactly this format:\n\n**Overview**\n1-2 sentences describing the overall context and purpose of the conversation.\n\n**Topics Discussed**\n- List every distinct subject or theme that came up in the conversation\n\n**Key Points**\n- List the most important things said, decisions made, or information shared\n- Include who said what if multiple people are involved\n- Be specific, not vague\n\n**Action Items** (omit this section if none)\n- Any tasks, follow-ups, or commitments mentioned\n\n**Sentiment**\nOverall tone of the conversation. Note any emotional shifts or tension if present.\n\n---\nRules:\n- If the conversation is very short or has no meaningful content, say: \"Conversation too short to summarize meaningfully.\"\n- Use plain text inside bullet points, no nested markdown\n- Be specific and factual, do not interpret or editorialize beyond what was said\n- Keep the Overview and Sentiment sections to 1-2 sentences each\n- There is no minimum or maximum number of bullet points — cover everything relevant\n\nTranscript:\n{{ $json.chat_history }}"
+            }
+          ]
+        },
+        "options": {
+          "num_ctx": 32768
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.ollama",
+      "typeVersion": 1,
+      "position": [32, -128],
+      "id": "node-ollama",
+      "name": "Message a model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "YOUR_OLLAMA_CREDENTIAL_ID",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:YOUR_BEEPER_PORT/v1/chats/YOUR_CHAT_ID/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_BEEPER_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"text\": {{ JSON.stringify($json.content) }}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [384, -128],
+      "id": "node-http-request",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM chat_logs;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [592, -128],
+      "id": "node-sql-delete",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Execute a SQL query", "type": "main", "index": 0 }]]
+    },
+    "Execute a SQL query": {
+      "main": [[{ "node": "Code in JavaScript", "type": "main", "index": 0 }]]
+    },
+    "Code in JavaScript": {
+      "main": [[{ "node": "Message a model", "type": "main", "index": 0 }]]
+    },
+    "Message a model": {
+      "main": [[{ "node": "HTTP Request", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request": {
+      "main": [[{ "node": "Execute a SQL query1", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}
